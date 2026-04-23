@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 600px at 0% -10%, rgba(99, 102, 241, 0.28), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(56, 189, 248, 0.2), transparent 60%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4ff 48%, #f7fbff 100%);
+  color: #0f172a;
+}
+
+::selection {
+  background: rgba(79, 70, 229, 0.2);
+}
+
+.page-shell {
+  @apply min-h-screen;
+}
+
+.panel {
+  @apply rounded-2xl border border-white/60 bg-white/70 shadow-xl shadow-slate-900/5 backdrop-blur-md;
+}
+
+.card {
+  @apply panel p-5;
+}
+
+.gradient-title {
+  @apply bg-gradient-to-r from-indigo-600 via-sky-600 to-cyan-500 bg-clip-text text-transparent;
+}
+
+.soft-input {
+  @apply rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-slate-700 outline-none ring-0 transition focus:border-indigo-300 focus:shadow-[0_0_0_4px_rgba(99,102,241,0.12)];
+}
+
+.primary-btn {
+  @apply rounded-xl bg-gradient-to-r from-indigo-600 to-sky-500 px-4 py-2 font-medium text-white shadow-lg shadow-indigo-500/30 transition hover:-translate-y-0.5 hover:from-indigo-500 hover:to-sky-400 disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+.ghost-btn {
+  @apply rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50;
+}
+
+.sql-shell {
+  @apply rounded-xl border border-indigo-200/70 bg-gradient-to-br from-indigo-50 via-sky-50 to-cyan-50 p-3 shadow-inner;
+}
+
+.sql-label {
+  @apply mb-1 inline-block rounded-full bg-gradient-to-r from-indigo-600 to-sky-500 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white;
+}
+
+.sql-text {
+  @apply whitespace-pre-wrap break-all font-mono text-xs leading-6 text-slate-700;
+}
