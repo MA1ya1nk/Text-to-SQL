@@ -54,3 +54,35 @@ body {
 .sql-text {
   @apply whitespace-pre-wrap break-all font-mono text-xs leading-6 text-slate-700;
 }
+
+.error-callout {
+  @apply rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-50 p-4 text-sm;
+}
+
+.error-title {
+  @apply font-semibold text-red-700;
+}
+
+.error-detail {
+  @apply mt-1 whitespace-pre-wrap text-red-600;
+}
+
+.toast {
+  @apply fixed right-6 top-6 z-50 max-w-sm rounded-xl border p-4 shadow-2xl backdrop-blur-md;
+}
+
+.toast-success {
+  @apply border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50;
+}
+
+.toast-error {
+  @apply border-red-200 bg-gradient-to-br from-red-50 to-rose-50;
+}
+
+.toast-title {
+  @apply text-sm font-semibold;
+}
+
+.toast-message {
+  @apply mt-1 text-xs text-slate-600;
+}

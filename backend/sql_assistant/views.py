@@ -1,6 +1,8 @@
 import csv
+import hashlib
 import io
 
+from django.core.cache import cache
 from django.db import connection
 from django.http import HttpResponse
 from openpyxl import Workbook
@@ -21,20 +23,43 @@ from .serializers import (
     QueryRequestSerializer,
 )
 from .services.chart_detector import chart_detector
+from .services.deterministic_sql_builder import deterministic_sql_builder
+from .services.llm_client import LLMServiceError
 from .services.nl_to_sql_service import nl_to_sql_service
 from .services.query_executor import query_executor
 from .services.query_explainer import query_explainer
+from .services.schema_intent_guard import schema_intent_guard
 from .services.schema_service import schema_service
 from .services.sql_validator import sql_validator
 
 
 def _generate_sql(question: str, context: str = "") -> str:
     dialect = "sqlite" if connection.vendor == "sqlite" else "postgresql"
-    schema_summary = schema_service.get_schema_summary()
+    schema = schema_service.get_schema()
+    if not schema_intent_guard.can_answer(question, schema):
+        raise ValueError(
+            "This question cannot be answered from the current schema. "
+            "Please use available tables/fields or rephrase your question."
+        )
+
+    deterministic_sql = deterministic_sql_builder.build(question, dialect)
+    if deterministic_sql:
+        return sql_validator.validate_and_rewrite(deterministic_sql, dialect=dialect)
+
+    matched_tables = schema_intent_guard.matched_tables(question, schema)
+    schema_summary = schema_service.get_schema_summary(matched_tables=matched_tables)
+    cache_basis = f"{dialect}|{question.strip().lower()}|{context.strip().lower()}|{schema_summary}"
+    cache_key = "sql_generation_v1:" + hashlib.sha256(cache_basis.encode("utf-8")).hexdigest()
+    cached_sql = cache.get(cache_key)
+    if cached_sql:
+        return cached_sql
+
     raw_sql = nl_to_sql_service.generate(
         question=question, schema_summary=schema_summary, dialect=dialect, context=context
     )
-    return sql_validator.validate_and_rewrite(raw_sql, dialect=dialect)
+    validated_sql = sql_validator.validate_and_rewrite(raw_sql, dialect=dialect)
+    cache.set(cache_key, validated_sql, 900)
+    return validated_sql
 
 
 def _execute_sql(question: str, sql: str):
@@ -49,6 +74,20 @@ def _execute_sql(question: str, sql: str):
         result_count=len(result["rows"]),
     )
     return {"sql": safe_sql, "chart": chart, **result}
+
+
+def _error_response(exc: Exception) -> Response:
+    if isinstance(exc, LLMServiceError):
+        return Response(
+            {"error": exc.user_message, "code": exc.code},
+            status=exc.status_code,
+        )
+    if isinstance(exc, ValueError):
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(
+        {"error": "Unable to process this request right now. Please try again."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 @api_view(["GET"])
@@ -73,7 +112,7 @@ def query_view(request):
     try:
         return Response(_execute_sql(serializer.validated_data["question"], _generate_sql(serializer.validated_data["question"])))
     except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return _error_response(exc)
 
 
 @api_view(["POST"])
@@ -88,7 +127,7 @@ def followup_view(request):
             )
         )
     except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return _error_response(exc)
 
 
 @api_view(["POST"])
@@ -99,7 +138,7 @@ def preview_view(request):
         sql = _generate_sql(serializer.validated_data["question"], serializer.validated_data.get("context", ""))
         return Response({"sql": sql})
     except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return _error_response(exc)
 
 
 @api_view(["POST"])
@@ -109,7 +148,7 @@ def execute_view(request):
     try:
         return Response(_execute_sql(serializer.validated_data["question"], serializer.validated_data["sql"]))
     except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return _error_response(exc)
 
 
 @api_view(["POST"])
@@ -123,7 +162,7 @@ def explain_view(request):
         )
         return Response({"explanation": explanation})
     except Exception as exc:
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return _error_response(exc)
 
 
 @api_view(["GET"])

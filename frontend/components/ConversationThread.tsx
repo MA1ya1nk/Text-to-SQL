@@ -16,7 +16,12 @@ export function ConversationThread({ entries }: { entries: Entry[] }) {
               <pre className="sql-text">{item.response.sql}</pre>
             </div>
           )}
-          {item.error && <p className="mt-2 break-all whitespace-pre-wrap rounded-lg bg-red-50 p-2 text-xs text-red-600">{item.error}</p>}
+          {item.error && (
+            <div className="error-callout mt-2">
+              <p className="error-title text-xs">Execution issue</p>
+              <p className="error-detail break-all text-xs">{item.error}</p>
+            </div>
+          )}
         </div>
       ))}
     </div>

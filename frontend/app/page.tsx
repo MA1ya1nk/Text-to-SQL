@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { QueryInput } from "@/components/QueryInput";
 import { ResultsTable } from "@/components/ResultsTable";
 import { AutoChart } from "@/components/AutoChart";
@@ -20,7 +20,26 @@ export default function HomePage() {
   const [explanation, setExplanation] = useState("");
   const [explainLoading, setExplainLoading] = useState(false);
   const [executeLoading, setExecuteLoading] = useState(false);
+  const [currentError, setCurrentError] = useState("");
+  const [toast, setToast] = useState<{ type: "success" | "error"; title: string; message: string } | null>(null);
   const { loading, setLoading, addConversation, conversation } = useAssistantStore();
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const formatError = (error: unknown) => {
+    const message = (error as Error)?.message || "Unable to process this request right now.";
+    if (message.toLowerCase().includes("cannot be answered from the current schema")) {
+      return "This question is outside the connected schema. Try using available tables/columns from the Schema page.";
+    }
+    if (message.toLowerCase().includes("high traffic") || message.toLowerCase().includes("rate limit")) {
+      return "We are experiencing high traffic right now. Please wait a moment and try again.";
+    }
+    return message;
+  };
 
   const onSubmit = async (question: string) => {
     setLoading(true);
@@ -28,12 +47,15 @@ export default function HomePage() {
     setResult(null);
     setDraftSql("");
     setExplanation("");
+    setCurrentError("");
     try {
       const sql = await previewQuery(question);
       setDraftSql(sql);
       setTab("sql");
     } catch (error) {
-      addConversation({ question, error: (error as Error).message });
+      const message = formatError(error);
+      setCurrentError(message);
+      addConversation({ question, error: message });
     } finally {
       setLoading(false);
     }
@@ -42,6 +64,7 @@ export default function HomePage() {
   const onExecute = async () => {
     if (!currentQuestion || !draftSql.trim()) return;
     setExecuteLoading(true);
+    setCurrentError("");
     try {
       const data = await executeQuery(currentQuestion, draftSql);
       setResult(data);
@@ -49,7 +72,9 @@ export default function HomePage() {
       addConversation({ question: currentQuestion, response: data });
       setTab("table");
     } catch (error) {
-      addConversation({ question: currentQuestion || "Manual SQL", error: (error as Error).message });
+      const message = formatError(error);
+      setCurrentError(message);
+      addConversation({ question: currentQuestion || "Manual SQL", error: message });
     } finally {
       setExecuteLoading(false);
     }
@@ -58,11 +83,14 @@ export default function HomePage() {
   const onExplain = async () => {
     if (!draftSql.trim()) return;
     setExplainLoading(true);
+    setCurrentError("");
     try {
       const text = await explainQuery(draftSql, currentQuestion);
       setExplanation(text);
     } catch (error) {
-      setExplanation((error as Error).message);
+      const message = formatError(error);
+      setCurrentError(message);
+      setExplanation(message);
     } finally {
       setExplainLoading(false);
     }
@@ -76,13 +104,31 @@ export default function HomePage() {
         question: currentQuestion,
         sql_query: draftSql
       });
+      setToast({
+        type: "success",
+        title: "Saved to favorites",
+        message: "Your query was saved successfully. You can view it on the Favorites page."
+      });
     } catch (error) {
-      addConversation({ question: currentQuestion, error: (error as Error).message });
+      const message = formatError(error);
+      setCurrentError(message);
+      addConversation({ question: currentQuestion, error: message });
+      setToast({
+        type: "error",
+        title: "Could not save favorite",
+        message
+      });
     }
   };
 
   return (
     <div className="space-y-4">
+      {toast && (
+        <div className={`toast ${toast.type === "success" ? "toast-success" : "toast-error"}`}>
+          <p className={`toast-title ${toast.type === "success" ? "text-emerald-700" : "text-red-700"}`}>{toast.title}</p>
+          <p className="toast-message">{toast.message}</p>
+        </div>
+      )}
       <section className="card relative overflow-hidden">
         <div className="pointer-events-none absolute -right-16 -top-16 h-52 w-52 rounded-full bg-indigo-400/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-20 -left-20 h-56 w-56 rounded-full bg-sky-400/20 blur-3xl" />
@@ -98,6 +144,12 @@ export default function HomePage() {
       <div className="grid gap-4 lg:grid-cols-4">
       <div className="space-y-4 lg:col-span-3">
         <QueryInput onSubmit={onSubmit} loading={loading} />
+        {currentError && (
+          <div className="error-callout">
+            <p className="error-title">Request could not be completed</p>
+            <p className="error-detail">{currentError}</p>
+          </div>
+        )}
         {draftSql && <QueryExplanation explanation={explanation} loading={explainLoading} onExplain={onExplain} />}
         {draftSql && (
           <div className="card space-y-3">

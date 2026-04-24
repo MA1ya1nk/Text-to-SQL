@@ -1,12 +1,16 @@
+import os
+
 from django.core.cache import cache
 from django.db import connection
 
 
 class SchemaService:
-    CACHE_KEY = "sql_assistant_schema_cache_v2"
-    TABLE_PREFIX = "ecommerce_"
+    CACHE_KEY = "sql_assistant_schema_cache_v3"
+    TABLE_PREFIX = os.getenv("SCHEMA_TABLE_PREFIX", "ecommerce_")
 
     def _is_relevant_table(self, table_name: str) -> bool:
+        if not self.TABLE_PREFIX:
+            return True
         return table_name.startswith(self.TABLE_PREFIX)
 
     def get_schema(self):
@@ -90,16 +94,26 @@ class SchemaService:
                         "sample_columns": sample_cols,
                     }
             else:
-                cursor.execute(
-                    """
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema='public'
-                      AND table_name LIKE %s
-                    ORDER BY table_name;
-                    """,
-                    [f"{self.TABLE_PREFIX}%"],
-                )
+                if self.TABLE_PREFIX:
+                    cursor.execute(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema='public'
+                          AND table_name LIKE %s
+                        ORDER BY table_name;
+                        """,
+                        [f"{self.TABLE_PREFIX}%"],
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema='public'
+                        ORDER BY table_name;
+                        """
+                    )
                 table_names = [row[0] for row in cursor.fetchall()]
 
                 for table in table_names:
@@ -149,37 +163,63 @@ class SchemaService:
                         "sample_columns": sample_cols,
                     }
 
-                cursor.execute(
-                    """
-                    SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
-                    FROM information_schema.table_constraints AS tc
-                    JOIN information_schema.key_column_usage AS kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                    JOIN information_schema.constraint_column_usage AS ccu
-                      ON ccu.constraint_name = tc.constraint_name
-                    WHERE constraint_type = 'FOREIGN KEY'
-                      AND tc.table_schema='public'
-                      AND tc.table_name LIKE %s
-                      AND ccu.table_name LIKE %s;
-                    """,
-                    [f"{self.TABLE_PREFIX}%", f"{self.TABLE_PREFIX}%"],
-                )
+                if self.TABLE_PREFIX:
+                    cursor.execute(
+                        """
+                        SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+                        FROM information_schema.table_constraints AS tc
+                        JOIN information_schema.key_column_usage AS kcu
+                          ON tc.constraint_name = kcu.constraint_name
+                        JOIN information_schema.constraint_column_usage AS ccu
+                          ON ccu.constraint_name = tc.constraint_name
+                        WHERE constraint_type = 'FOREIGN KEY'
+                          AND tc.table_schema='public'
+                          AND tc.table_name LIKE %s
+                          AND ccu.table_name LIKE %s;
+                        """,
+                        [f"{self.TABLE_PREFIX}%", f"{self.TABLE_PREFIX}%"],
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name
+                        FROM information_schema.table_constraints AS tc
+                        JOIN information_schema.key_column_usage AS kcu
+                          ON tc.constraint_name = kcu.constraint_name
+                        JOIN information_schema.constraint_column_usage AS ccu
+                          ON ccu.constraint_name = tc.constraint_name
+                        WHERE constraint_type = 'FOREIGN KEY'
+                          AND tc.table_schema='public';
+                        """
+                    )
                 fks = [
                     {"table": r[0], "column": r[1], "ref_table": r[2], "ref_column": r[3]}
                     for r in cursor.fetchall()
                 ]
-                cursor.execute(
-                    """
-                    SELECT tc.table_name, kcu.column_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                    WHERE tc.constraint_type='PRIMARY KEY'
-                      AND tc.table_schema='public'
-                      AND tc.table_name LIKE %s;
-                    """,
-                    [f"{self.TABLE_PREFIX}%"],
-                )
+                if self.TABLE_PREFIX:
+                    cursor.execute(
+                        """
+                        SELECT tc.table_name, kcu.column_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                          ON tc.constraint_name = kcu.constraint_name
+                        WHERE tc.constraint_type='PRIMARY KEY'
+                          AND tc.table_schema='public'
+                          AND tc.table_name LIKE %s;
+                        """,
+                        [f"{self.TABLE_PREFIX}%"],
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT tc.table_name, kcu.column_name
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                          ON tc.constraint_name = kcu.constraint_name
+                        WHERE tc.constraint_type='PRIMARY KEY'
+                          AND tc.table_schema='public';
+                        """
+                    )
                 pks = [{"table": r[0], "column": r[1]} for r in cursor.fetchall()]
                 pk_set = {(pk["table"], pk["column"]) for pk in pks}
                 for table, table_data in tables.items():
@@ -195,14 +235,19 @@ class SchemaService:
         cache.delete(self.CACHE_KEY)
         return self.get_schema()
 
-    def get_schema_summary(self):
+    def get_schema_summary(self, matched_tables: list[str] | None = None):
         schema = self.get_schema()
+        allowed_tables = set(matched_tables or schema["tables"].keys())
         lines = ["Database schema:"]
         for table, data in schema["tables"].items():
+            if table not in allowed_tables:
+                continue
             cols = ", ".join([f'{c["name"]} ({c["type"]})' for c in data["columns"]])
             lines.append(f"- {table}: {cols}")
         lines.append("Foreign keys:")
         for fk in schema["relationships"]["foreign_keys"]:
+            if fk["table"] not in allowed_tables and fk["ref_table"] not in allowed_tables:
+                continue
             lines.append(f'- {fk["table"]}.{fk["column"]} -> {fk["ref_table"]}.{fk["ref_column"]}')
         return "\n".join(lines)
 
