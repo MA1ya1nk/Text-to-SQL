@@ -7,6 +7,10 @@ from django.db import connection
 class SchemaService:
     CACHE_KEY = "sql_assistant_schema_cache_v3"
     TABLE_PREFIX = os.getenv("SCHEMA_TABLE_PREFIX", "ecommerce_")
+    ENUM_LITERAL_HINTS = {
+        "ecommerce_order.status": ["pending", "paid", "shipped", "delivered", "cancelled"],
+        "ecommerce_customer.tier": ["bronze", "silver", "gold", "platinum"],
+    }
 
     def _is_relevant_table(self, table_name: str) -> bool:
         if not self.TABLE_PREFIX:
@@ -235,18 +239,34 @@ class SchemaService:
         cache.delete(self.CACHE_KEY)
         return self.get_schema()
 
+    def _expand_tables_with_fk_neighbors(self, seed_tables: set[str], schema: dict) -> set[str]:
+        if not seed_tables:
+            return set(schema["tables"].keys())
+        expanded = set(seed_tables)
+        for fk in schema["relationships"]["foreign_keys"]:
+            if fk["table"] in seed_tables:
+                expanded.add(fk["ref_table"])
+            if fk["ref_table"] in seed_tables:
+                expanded.add(fk["table"])
+        return expanded
+
     def get_schema_summary(self, matched_tables: list[str] | None = None):
         schema = self.get_schema()
-        allowed_tables = set(matched_tables or schema["tables"].keys())
-        lines = ["Database schema:"]
+        allowed_tables = self._expand_tables_with_fk_neighbors(set(matched_tables or []), schema)
+        lines = ["Schema:"]
         for table, data in schema["tables"].items():
             if table not in allowed_tables:
                 continue
-            cols = ", ".join([f'{c["name"]} ({c["type"]})' for c in data["columns"]])
-            lines.append(f"- {table}: {cols}")
+            cols = ", ".join([f'{c["name"]}:{c["type"]}' for c in data["columns"]])
+            lines.append(f"- {table}({cols})")
+        lines.append("Categorical literals:")
+        for field_name, values in self.ENUM_LITERAL_HINTS.items():
+            table_name = field_name.split(".", 1)[0]
+            if table_name in allowed_tables:
+                lines.append(f"- {field_name}: {', '.join(values)}")
         lines.append("Foreign keys:")
         for fk in schema["relationships"]["foreign_keys"]:
-            if fk["table"] not in allowed_tables and fk["ref_table"] not in allowed_tables:
+            if fk["table"] not in allowed_tables or fk["ref_table"] not in allowed_tables:
                 continue
             lines.append(f'- {fk["table"]}.{fk["column"]} -> {fk["ref_table"]}.{fk["ref_column"]}')
         return "\n".join(lines)

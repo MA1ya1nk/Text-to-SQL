@@ -39,14 +39,48 @@ function formatCompact(value: unknown) {
   }).format(value);
 }
 
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const normalized = value.replace(/,/g, "").trim();
+    if (!normalized) return null;
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 export function AutoChart({ columns, rows, chart }: Props) {
   if (!chart.xKey || !chart.yKey || chart.type === "table" || chart.type === "none") {
     return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
   }
-  const data = rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])));
-  const isDenseXAxis = data.length > 12;
+  const hasXKey = columns.includes(chart.xKey);
+  const hasYKey = columns.includes(chart.yKey);
+  if (!hasXKey || !hasYKey) {
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
+  }
+
+  const data = rows
+    .map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]])))
+    .map((row) => {
+      const numericY = toNumber(row[chart.yKey!]);
+      return {
+        ...row,
+        [chart.yKey!]: numericY
+      };
+    })
+    .filter((row) => row[chart.xKey!] !== null && row[chart.xKey!] !== undefined && row[chart.yKey!] !== null);
+
+  const uniqueXCount = new Set(data.map((row) => String(row[chart.xKey!]))).size;
+  const numericYCount = data.filter((row) => typeof row[chart.yKey!] === "number").length;
+  if (numericYCount < Math.max(3, Math.floor(data.length * 0.6)) || uniqueXCount < 2) {
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
+  }
+
+  const isDenseXAxis = data.length > 12 || uniqueXCount > 12;
   const xTickAngle = isDenseXAxis ? -35 : 0;
-  const xTickHeight = isDenseXAxis ? 70 : 35;
+  const xTickHeight = isDenseXAxis ? 92 : 44;
+  const xAxisLabelOffset = isDenseXAxis ? 26 : 12;
   const title = `${prettify(chart.yKey)} by ${prettify(chart.xKey)}`;
 
   if (chart.type === "line") {
@@ -58,7 +92,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
         </div>
         <div className="h-[360px] min-w-[720px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 16, right: 24, left: 28, bottom: 48 }}>
+            <LineChart data={data} margin={{ top: 16, right: 24, left: 16, bottom: 64 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
               <XAxis
                 dataKey={chart.xKey}
@@ -66,10 +100,25 @@ export function AutoChart({ columns, rows, chart }: Props) {
                 textAnchor={xTickAngle ? "end" : "middle"}
                 interval="preserveStartEnd"
                 minTickGap={20}
+                tickMargin={8}
                 tick={{ fontSize: 12, fill: "#475569" }}
                 height={xTickHeight}
+                label={{ value: prettify(chart.xKey), position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
               />
-              <YAxis width={75} tick={{ fontSize: 12, fill: "#475569" }} tickFormatter={formatCompact} />
+              <YAxis
+                width={86}
+                tick={{ fontSize: 12, fill: "#475569" }}
+                tickFormatter={formatCompact}
+                tickMargin={8}
+                label={{
+                  value: prettify(chart.yKey),
+                  angle: -90,
+                  position: "insideLeft",
+                  offset: -4,
+                  fill: "#334155",
+                  fontSize: 12
+                }}
+              />
               <Tooltip
                 formatter={(value: unknown, name: string) => [formatCompact(value), prettify(name)]}
                 labelFormatter={(value) => `${prettify(chart.xKey)}: ${String(value)}`}
@@ -120,7 +169,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
       </div>
       <div className="h-[360px] min-w-[720px]">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 16, right: 24, left: 28, bottom: 48 }} barCategoryGap="18%">
+          <BarChart data={data} margin={{ top: 16, right: 24, left: 16, bottom: 64 }} barCategoryGap="18%">
             <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
             <XAxis
               dataKey={chart.xKey}
@@ -128,10 +177,25 @@ export function AutoChart({ columns, rows, chart }: Props) {
               textAnchor={xTickAngle ? "end" : "middle"}
               interval="preserveStartEnd"
               minTickGap={20}
+              tickMargin={8}
               tick={{ fontSize: 12, fill: "#475569" }}
               height={xTickHeight}
+              label={{ value: prettify(chart.xKey), position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
             />
-            <YAxis width={75} tick={{ fontSize: 12, fill: "#475569" }} tickFormatter={formatCompact} />
+            <YAxis
+              width={86}
+              tick={{ fontSize: 12, fill: "#475569" }}
+              tickFormatter={formatCompact}
+              tickMargin={8}
+              label={{
+                value: prettify(chart.yKey),
+                angle: -90,
+                position: "insideLeft",
+                offset: -4,
+                fill: "#334155",
+                fontSize: 12
+              }}
+            />
             <Tooltip
               formatter={(value: unknown, name: string) => [formatCompact(value), prettify(name)]}
               labelFormatter={(value) => `${prettify(chart.xKey)}: ${String(value)}`}

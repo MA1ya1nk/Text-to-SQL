@@ -9,7 +9,6 @@ class QueryRequestSerializer(serializers.Serializer):
 
 class FollowUpRequestSerializer(serializers.Serializer):
     question = serializers.CharField()
-    context = serializers.CharField(required=False, allow_blank=True)
 
 
 class ExplainRequestSerializer(serializers.Serializer):

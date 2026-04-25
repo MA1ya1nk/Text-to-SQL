@@ -44,6 +44,12 @@ class ChartDetector:
         name = column_name.lower()
         return name == "id" or name.endswith("_id")
 
+    def _looks_like_metric_name(self, name: str) -> bool:
+        return any(hint in name for hint in self.MEASURE_HINTS)
+
+    def _looks_like_dimension_name(self, name: str) -> bool:
+        return any(hint in name for hint in self.DIMENSION_HINTS)
+
     def _pick_measure_column(self, columns, rows):
         row_count = len(rows)
         best_col = None
@@ -118,6 +124,78 @@ class ChartDetector:
 
         return best_col
 
+    def _is_measure_chartable(self, columns, rows, measure_column: str) -> bool:
+        idx = columns.index(measure_column)
+        values = [row[idx] for row in rows if idx < len(row)]
+        numeric_values = [value for value in values if self._is_numeric(value)]
+        if not numeric_values:
+            return False
+
+        numeric_ratio = len(numeric_values) / max(len(values), 1)
+        # Avoid plotting mostly non-numeric measure columns.
+        if numeric_ratio < 0.7:
+            return False
+
+        unique_ratio = len(set(numeric_values)) / max(len(numeric_values), 1)
+        name = measure_column.lower()
+        # Highly unique "numbers" with ID-like names are usually not useful as measures.
+        if self._is_identifier_name(name) and unique_ratio > 0.85:
+            return False
+        return True
+
+    def _pick_best_dimension_for_measure(self, columns, rows, measure_column: str):
+        measure_idx = columns.index(measure_column)
+        measure_name = measure_column.lower()
+        row_count = len(rows)
+        best_col = None
+        best_score = float("-inf")
+
+        for idx, column in enumerate(columns):
+            if idx == measure_idx:
+                continue
+            values = [row[idx] for row in rows if idx < len(row)]
+            non_null_values = [value for value in values if value is not None]
+            if not non_null_values:
+                continue
+
+            name = column.lower()
+            distinct_ratio = len(set(str(value) for value in non_null_values)) / max(len(non_null_values), 1)
+            date_like_count = sum(1 for value in non_null_values if self._is_date_like(value))
+            string_count = sum(1 for value in non_null_values if isinstance(value, str))
+            numeric_count = sum(1 for value in non_null_values if self._is_numeric(value))
+
+            score = 0.0
+            has_date_like = date_like_count > 0
+            if has_date_like:
+                score += 6.0
+            if self._looks_like_dimension_name(name):
+                score += 4.0
+            if self._is_identifier_name(name):
+                score -= 6.0
+            # Prefer human-readable dimensions over numeric columns.
+            score += 2.5 * (string_count / max(len(non_null_values), 1))
+            score -= 1.5 * (numeric_count / max(len(non_null_values), 1))
+            # Keep dimensions at a usable granularity for charts.
+            if 0.05 <= distinct_ratio <= 0.8:
+                score += 2.0
+            elif distinct_ratio > 0.95 and row_count >= 8:
+                score -= 3.0
+
+            # Avoid selecting semantically similar metric columns as x-axis.
+            if self._looks_like_metric_name(name) and not self._looks_like_dimension_name(name):
+                score -= 2.0
+            if name == measure_name:
+                score -= 4.0
+            # Prefer stable dimensions like dates/categories for large result sets.
+            if row_count > 30 and not has_date_like and distinct_ratio > 0.9:
+                score -= 2.0
+
+            if score > best_score:
+                best_score = score
+                best_col = column
+
+        return best_col
+
     def detect(self, columns, rows):
         if not columns or not rows:
             return {"type": "none", "xKey": None, "yKey": None}
@@ -126,9 +204,11 @@ class ChartDetector:
         y_key = self._pick_measure_column(columns, sample_rows)
         if not y_key:
             return {"type": "table", "xKey": None, "yKey": None}
+        if not self._is_measure_chartable(columns, sample_rows, y_key):
+            return {"type": "table", "xKey": None, "yKey": None}
 
         # Prefer line charts for date-like x-axis if present.
-        date_dimension = self._pick_dimension_column(columns, sample_rows, preferred_date=True)
+        date_dimension = self._pick_best_dimension_for_measure(columns, sample_rows, y_key)
         if date_dimension:
             # If the chosen dimension really has date-like data, use line.
             dim_idx = columns.index(date_dimension)
@@ -136,7 +216,7 @@ class ChartDetector:
             if dim_values and any(self._is_date_like(value) for value in dim_values):
                 return {"type": "line", "xKey": date_dimension, "yKey": y_key}
 
-        x_key = self._pick_dimension_column(columns, sample_rows, preferred_date=False)
+        x_key = self._pick_best_dimension_for_measure(columns, sample_rows, y_key)
         if x_key and x_key != y_key:
             low_rows = len(sample_rows) <= 10
             y_name = y_key.lower()

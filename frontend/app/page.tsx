@@ -8,7 +8,7 @@ import { SQLDisplay } from "@/components/SQLDisplay";
 import { QueryExplanation } from "@/components/QueryExplanation";
 import { ConversationThread } from "@/components/ConversationThread";
 import { ExportPanel } from "@/components/ExportPanel";
-import { executeQuery, explainQuery, previewQuery, saveFavorite } from "@/lib/api";
+import { ApiError, executeQuery, explainQuery, previewQuery, saveFavorite } from "@/lib/api";
 import { QueryResponse } from "@/lib/types";
 import { useAssistantStore } from "@/store/assistant-store";
 
@@ -31,12 +31,21 @@ export default function HomePage() {
   }, [toast]);
 
   const formatError = (error: unknown) => {
-    const message = (error as Error)?.message || "Unable to process this request right now.";
+    const apiError = error as ApiError;
+    const message = apiError?.message || "Unable to process this request right now.";
+    const code = apiError?.code || "";
+
     if (message.toLowerCase().includes("cannot be answered from the current schema")) {
       return "This question is outside the connected schema. Try using available tables/columns from the Schema page.";
     }
-    if (message.toLowerCase().includes("high traffic") || message.toLowerCase().includes("rate limit")) {
+    if (code === "rate_limit") {
       return "We are experiencing high traffic right now. Please wait a moment and try again.";
+    }
+    if (code === "provider_auth") {
+      return "LLM provider authentication failed. Please verify API keys in backend configuration.";
+    }
+    if (code === "provider_unavailable") {
+      return "The AI provider is temporarily unavailable. Please retry in a few moments.";
     }
     return message;
   };

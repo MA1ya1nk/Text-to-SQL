@@ -4,6 +4,5 @@ django-cors-headers==4.4.0
 psycopg2-binary==2.9.10
 Faker==30.8.2
 openai==1.51.0
-google-generativeai==0.8.3
 python-dotenv==1.0.1
 openpyxl==3.1.5
