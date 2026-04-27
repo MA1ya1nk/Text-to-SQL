@@ -22,6 +22,8 @@ class ChartDetector:
         "sum",
     }
     DIMENSION_HINTS = {"name", "title", "category", "type", "segment", "month", "day", "date"}
+    CURRENCY_HINTS = {"revenue", "amount", "price", "cost", "sales", "profit", "spend", "gmv"}
+    PERCENT_HINTS = {"percent", "percentage", "ratio", "rate", "pct", "share"}
 
     def _is_numeric(self, value) -> bool:
         return isinstance(value, (int, float, Decimal)) and not isinstance(value, bool)
@@ -49,6 +51,45 @@ class ChartDetector:
 
     def _looks_like_dimension_name(self, name: str) -> bool:
         return any(hint in name for hint in self.DIMENSION_HINTS)
+
+    def _infer_y_format(self, y_key: str) -> str:
+        name = y_key.lower()
+        if any(token in name for token in self.CURRENCY_HINTS):
+            return "currency"
+        if any(token in name for token in self.PERCENT_HINTS):
+            return "percent"
+        return "number"
+
+    def _infer_x_type(self, columns, rows, x_key: str) -> str:
+        idx = columns.index(x_key)
+        values = [row[idx] for row in rows if idx < len(row) and row[idx] is not None]
+        if values and any(self._is_date_like(v) for v in values):
+            return "time"
+        return "category"
+
+    def _build_response(
+        self,
+        chart_type: str,
+        x_key: str | None,
+        y_key: str | None,
+        columns=None,
+        rows=None,
+    ):
+        x_label = x_key.replace("_", " ").title() if x_key else None
+        y_label = y_key.replace("_", " ").title() if y_key else None
+        x_type = self._infer_x_type(columns, rows, x_key) if x_key and columns and rows else "category"
+        y_format = self._infer_y_format(y_key) if y_key else "number"
+        return {
+            "type": chart_type,
+            "xKey": x_key,
+            "yKey": y_key,
+            "xLabel": x_label,
+            "yLabel": y_label,
+            "xType": x_type,
+            "yFormat": y_format,
+            "sortBy": x_key if x_key else None,
+            "sortOrder": "asc",
+        }
 
     def _pick_measure_column(self, columns, rows):
         row_count = len(rows)
@@ -196,16 +237,16 @@ class ChartDetector:
 
         return best_col
 
-    def detect(self, columns, rows):
+    def detect(self, columns, rows, question: str = ""):
         if not columns or not rows:
-            return {"type": "none", "xKey": None, "yKey": None}
+            return self._build_response("none", None, None)
 
         sample_rows = rows[: min(len(rows), 100)]
         y_key = self._pick_measure_column(columns, sample_rows)
         if not y_key:
-            return {"type": "table", "xKey": None, "yKey": None}
+            return self._build_response("table", None, None)
         if not self._is_measure_chartable(columns, sample_rows, y_key):
-            return {"type": "table", "xKey": None, "yKey": None}
+            return self._build_response("table", None, None)
 
         # Prefer line charts for date-like x-axis if present.
         date_dimension = self._pick_best_dimension_for_measure(columns, sample_rows, y_key)
@@ -214,17 +255,21 @@ class ChartDetector:
             dim_idx = columns.index(date_dimension)
             dim_values = [row[dim_idx] for row in sample_rows if dim_idx < len(row) and row[dim_idx] is not None]
             if dim_values and any(self._is_date_like(value) for value in dim_values):
-                return {"type": "line", "xKey": date_dimension, "yKey": y_key}
+                return self._build_response("line", date_dimension, y_key, columns=columns, rows=sample_rows)
 
         x_key = self._pick_best_dimension_for_measure(columns, sample_rows, y_key)
         if x_key and x_key != y_key:
+            q = question.lower()
+            if any(token in q for token in ["trend", "over time", "by month", "by day", "monthly", "daily"]):
+                return self._build_response("line", x_key, y_key, columns=columns, rows=sample_rows)
             low_rows = len(sample_rows) <= 10
             y_name = y_key.lower()
             pie_friendly = any(token in y_name for token in {"share", "percent", "ratio", "pct"})
-            chart_type = "pie" if (low_rows and pie_friendly) else "bar"
-            return {"type": chart_type, "xKey": x_key, "yKey": y_key}
+            high_cardinality = len({str(row[columns.index(x_key)]) for row in sample_rows if columns.index(x_key) < len(row)}) > 12
+            chart_type = "pie" if (low_rows and pie_friendly and not high_cardinality) else "bar"
+            return self._build_response(chart_type, x_key, y_key, columns=columns, rows=sample_rows)
 
-        return {"type": "table", "xKey": None, "yKey": None}
+        return self._build_response("table", None, None)
 
 
 chart_detector = ChartDetector()

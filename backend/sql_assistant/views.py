@@ -1,6 +1,8 @@
 import csv
+import difflib
 import hashlib
 import io
+import re
 
 from django.core.cache import cache
 from django.db import connection
@@ -32,6 +34,42 @@ from .services.schema_service import schema_service
 from .services.sql_validator import sql_validator
 
 
+class QueryExecutionUserError(ValueError):
+    def __init__(self, message: str, code: str = "sql_execution_error"):
+        super().__init__(message)
+        self.code = code
+
+
+def _extract_unknown_identifier(error_message: str) -> tuple[str | None, str | None]:
+    text = error_message.strip()
+    patterns = [
+        (r"no such table:\s*([a-zA-Z0-9_\.]+)", "table"),
+        (r"no such column:\s*([a-zA-Z0-9_\.]+)", "column"),
+        (r'relation\s+"([^"]+)"\s+does not exist', "table"),
+        (r'column\s+"([^"]+)"\s+does not exist', "column"),
+    ]
+    for pattern, kind in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return kind, match.group(1)
+    return None, None
+
+
+def _suggest_identifiers(kind: str, unknown_identifier: str) -> list[str]:
+    schema = schema_service.get_schema()
+    if kind == "table":
+        candidates = sorted(schema["tables"].keys())
+    else:
+        all_columns = set()
+        for table in schema["tables"].values():
+            for column in table.get("columns", []):
+                column_name = column.get("name")
+                if column_name:
+                    all_columns.add(column_name)
+        candidates = sorted(all_columns)
+    return difflib.get_close_matches(unknown_identifier, candidates, n=3, cutoff=0.6)
+
+
 def _generate_sql(question: str) -> str:
     dialect = "sqlite" if connection.vendor == "sqlite" else "postgresql"
     schema = schema_service.get_schema()
@@ -44,13 +82,29 @@ def _generate_sql(question: str) -> str:
     matched_tables = schema_intent_guard.matched_tables(question, schema)
     schema_summary = schema_service.get_schema_summary(matched_tables=matched_tables)
     cache_basis = f"{dialect}|{question.strip().lower()}|{schema_summary}"
-    cache_key = "sql_generation_v4:" + hashlib.sha256(cache_basis.encode("utf-8")).hexdigest()
+    cache_key = "sql_generation_v10:" + hashlib.sha256(cache_basis.encode("utf-8")).hexdigest()
     cached_sql = cache.get(cache_key)
     if cached_sql:
         return cached_sql
 
     raw_sql = nl_to_sql_service.generate(question=question, schema_summary=schema_summary, dialect=dialect)
     validated_sql = sql_validator.validate_and_rewrite(raw_sql, dialect=dialect)
+    try:
+        sql_validator.ensure_schema_identifiers(validated_sql, schema)
+        sql_validator.ensure_question_coverage(question=question, sql=validated_sql, dialect=dialect)
+    except ValueError as generation_error:
+        retry_sql = nl_to_sql_service.generate(
+            question=question,
+            schema_summary=schema_summary,
+            dialect=dialect,
+            correction_hint=str(generation_error),
+        )
+        validated_sql = sql_validator.validate_and_rewrite(retry_sql, dialect=dialect)
+        try:
+            sql_validator.ensure_schema_identifiers(validated_sql, schema)
+            sql_validator.ensure_question_coverage(question=question, sql=validated_sql, dialect=dialect)
+        except ValueError:
+            pass
     cache.set(cache_key, validated_sql, 900)
     return validated_sql
 
@@ -58,8 +112,26 @@ def _generate_sql(question: str) -> str:
 def _execute_sql(question: str, sql: str):
     dialect = "sqlite" if connection.vendor == "sqlite" else "postgresql"
     safe_sql = sql_validator.validate_and_rewrite(sql, dialect=dialect)
-    result = query_executor.execute(safe_sql)
-    chart = chart_detector.detect(result["columns"], result["rows"])
+    try:
+        result = query_executor.execute(safe_sql)
+    except Exception as exc:
+        kind, unknown_identifier = _extract_unknown_identifier(str(exc))
+        if kind and unknown_identifier:
+            suggestions = _suggest_identifiers(kind, unknown_identifier)
+            if suggestions:
+                suggestions_text = ", ".join(suggestions)
+                message = (
+                    f"SQL references unknown {kind} '{unknown_identifier}'. "
+                    f"Did you mean: {suggestions_text}?"
+                )
+            else:
+                message = f"SQL references unknown {kind} '{unknown_identifier}'."
+            raise QueryExecutionUserError(message, code="sql_invalid_identifier") from exc
+        raise QueryExecutionUserError(
+            "SQL execution failed. Please review table/column names and try again.",
+            code="sql_execution_error",
+        ) from exc
+    chart = chart_detector.detect(result["columns"], result["rows"], question=question)
     QueryHistory.objects.create(
         question=question,
         sql_query=safe_sql,
@@ -75,11 +147,20 @@ def _error_response(exc: Exception) -> Response:
             {"error": exc.user_message, "code": exc.code},
             status=exc.status_code,
         )
+    if isinstance(exc, QueryExecutionUserError):
+        return Response(
+            {"error": str(exc), "code": exc.code},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     if isinstance(exc, ValueError):
-        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        message = str(exc)
+        code = "validation_error"
+        if "cannot be answered from the current schema" in message.lower():
+            code = "schema_out_of_scope"
+        return Response({"error": message, "code": code}, status=status.HTTP_400_BAD_REQUEST)
     return Response(
-        {"error": "Unable to process this request right now. Please try again."},
-        status=status.HTTP_400_BAD_REQUEST,
+        {"error": "Unable to process this request right now. Please try again.", "code": "internal_error"},
+        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
 
 
@@ -214,7 +295,7 @@ def export_excel_view(request):
     worksheet.title = "Query Results"
     header_fill = PatternFill(fill_type="solid", fgColor="EEF2FF")
     header_font = Font(bold=True)
-    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    header_alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
     body_alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
     sanitized_columns = [str(col) if col is not None else "" for col in columns]

@@ -30,7 +30,7 @@ export function SQLDisplay({ sqlText, editable = false, onSqlChange, onRun, runn
         <button
           onClick={onRun}
           disabled={running || !sqlText.trim()}
-          className="primary-btn"
+          className="primary-btn w-full sm:w-auto"
         >
           {running ? "Running..." : "Run SQL"}
         </button>

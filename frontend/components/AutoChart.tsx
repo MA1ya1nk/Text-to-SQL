@@ -19,7 +19,17 @@ import {
 type Props = {
   columns: string[];
   rows: Array<Array<string | number | null>>;
-  chart: { type: string; xKey: string | null; yKey: string | null };
+  chart: {
+    type: string;
+    xKey: string | null;
+    yKey: string | null;
+    xLabel?: string | null;
+    yLabel?: string | null;
+    xType?: string;
+    yFormat?: string;
+    sortBy?: string | null;
+    sortOrder?: string;
+  };
 };
 
 const colors = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2"];
@@ -39,6 +49,17 @@ function formatCompact(value: unknown) {
   }).format(value);
 }
 
+function formatValueByType(value: unknown, format: string | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return String(value ?? "");
+  if (format === "currency") {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+  }
+  if (format === "percent") {
+    return `${(value * 100).toFixed(1)}%`;
+  }
+  return formatCompact(value);
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -51,13 +72,16 @@ function toNumber(value: unknown): number | null {
 }
 
 export function AutoChart({ columns, rows, chart }: Props) {
+  if (!rows.length) {
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No rows returned, so there is nothing to chart.</div>;
+  }
   if (!chart.xKey || !chart.yKey || chart.type === "table" || chart.type === "none") {
-    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">Query ran successfully. This result is better suited for table view than chart view.</div>;
   }
   const hasXKey = columns.includes(chart.xKey);
   const hasYKey = columns.includes(chart.yKey);
   if (!hasXKey || !hasYKey) {
-    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">Chart metadata did not match returned columns. Try rerunning or switch to table view.</div>;
   }
 
   const data = rows
@@ -71,17 +95,26 @@ export function AutoChart({ columns, rows, chart }: Props) {
     })
     .filter((row) => row[chart.xKey!] !== null && row[chart.xKey!] !== undefined && row[chart.yKey!] !== null);
 
+  if (chart.xType === "time") {
+    data.sort((a, b) => String(a[chart.xKey!]).localeCompare(String(b[chart.xKey!])));
+  } else if (chart.sortBy && chart.sortBy === chart.xKey) {
+    const direction = chart.sortOrder === "desc" ? -1 : 1;
+    data.sort((a, b) => String(a[chart.xKey!]).localeCompare(String(b[chart.xKey!])) * direction);
+  }
+
   const uniqueXCount = new Set(data.map((row) => String(row[chart.xKey!]))).size;
   const numericYCount = data.filter((row) => typeof row[chart.yKey!] === "number").length;
   if (numericYCount < Math.max(3, Math.floor(data.length * 0.6)) || uniqueXCount < 2) {
-    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">No chart suggested for this result.</div>;
+    return <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 text-sm text-slate-600">Not enough numeric variation to build a meaningful chart. Table view is recommended.</div>;
   }
 
   const isDenseXAxis = data.length > 12 || uniqueXCount > 12;
   const xTickAngle = isDenseXAxis ? -35 : 0;
   const xTickHeight = isDenseXAxis ? 92 : 44;
   const xAxisLabelOffset = isDenseXAxis ? 26 : 12;
-  const title = `${prettify(chart.yKey)} by ${prettify(chart.xKey)}`;
+  const xLabel = chart.xLabel || prettify(chart.xKey);
+  const yLabel = chart.yLabel || prettify(chart.yKey);
+  const title = `${yLabel} by ${xLabel}`;
 
   if (chart.type === "line") {
     return (
@@ -90,7 +123,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
           <p className="text-sm font-semibold text-slate-800">{title}</p>
           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">Line Chart</span>
         </div>
-        <div className="h-[360px] min-w-[720px]">
+        <div className="h-[300px] min-w-[620px] sm:h-[360px] sm:min-w-[720px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 16, right: 24, left: 16, bottom: 64 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
@@ -103,15 +136,15 @@ export function AutoChart({ columns, rows, chart }: Props) {
                 tickMargin={8}
                 tick={{ fontSize: 12, fill: "#475569" }}
                 height={xTickHeight}
-                label={{ value: prettify(chart.xKey), position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
+                label={{ value: xLabel, position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
               />
               <YAxis
                 width={86}
                 tick={{ fontSize: 12, fill: "#475569" }}
-                tickFormatter={formatCompact}
+                tickFormatter={(value) => formatValueByType(value, chart.yFormat)}
                 tickMargin={8}
                 label={{
-                  value: prettify(chart.yKey),
+                  value: yLabel,
                   angle: -90,
                   position: "insideLeft",
                   offset: -4,
@@ -120,8 +153,8 @@ export function AutoChart({ columns, rows, chart }: Props) {
                 }}
               />
               <Tooltip
-                formatter={(value: unknown, name: string) => [formatCompact(value), prettify(name)]}
-                labelFormatter={(value) => `${prettify(chart.xKey)}: ${String(value)}`}
+                formatter={(value: unknown, name: string) => [formatValueByType(value, chart.yFormat), prettify(name)]}
+                labelFormatter={(value) => `${xLabel}: ${String(value)}`}
               />
               <Legend />
               <Line type="monotone" dataKey={chart.yKey} stroke="#2563eb" strokeWidth={3} dot={{ r: 3 }} />
@@ -138,7 +171,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
           <p className="text-sm font-semibold text-slate-800">{title}</p>
           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">Pie Chart</span>
         </div>
-        <div className="h-[360px] min-w-[720px]">
+        <div className="h-[300px] min-w-[620px] sm:h-[360px] sm:min-w-[720px]">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -153,7 +186,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
                   <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
                 ))}
               </Pie>
-              <Tooltip formatter={(value: unknown, name: string) => [formatCompact(value), prettify(name)]} />
+              <Tooltip formatter={(value: unknown, name: string) => [formatValueByType(value, chart.yFormat), prettify(name)]} />
               <Legend />
             </PieChart>
           </ResponsiveContainer>
@@ -167,7 +200,7 @@ export function AutoChart({ columns, rows, chart }: Props) {
         <p className="text-sm font-semibold text-slate-800">{title}</p>
         <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">Bar Chart</span>
       </div>
-      <div className="h-[360px] min-w-[720px]">
+      <div className="h-[300px] min-w-[620px] sm:h-[360px] sm:min-w-[720px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 16, right: 24, left: 16, bottom: 64 }} barCategoryGap="18%">
             <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
@@ -180,15 +213,15 @@ export function AutoChart({ columns, rows, chart }: Props) {
               tickMargin={8}
               tick={{ fontSize: 12, fill: "#475569" }}
               height={xTickHeight}
-              label={{ value: prettify(chart.xKey), position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
+              label={{ value: xLabel, position: "insideBottom", offset: -xAxisLabelOffset, fill: "#334155", fontSize: 12 }}
             />
             <YAxis
               width={86}
               tick={{ fontSize: 12, fill: "#475569" }}
-              tickFormatter={formatCompact}
+              tickFormatter={(value) => formatValueByType(value, chart.yFormat)}
               tickMargin={8}
               label={{
-                value: prettify(chart.yKey),
+                value: yLabel,
                 angle: -90,
                 position: "insideLeft",
                 offset: -4,
@@ -197,8 +230,8 @@ export function AutoChart({ columns, rows, chart }: Props) {
               }}
             />
             <Tooltip
-              formatter={(value: unknown, name: string) => [formatCompact(value), prettify(name)]}
-              labelFormatter={(value) => `${prettify(chart.xKey)}: ${String(value)}`}
+              formatter={(value: unknown, name: string) => [formatValueByType(value, chart.yFormat), prettify(name)]}
+              labelFormatter={(value) => `${xLabel}: ${String(value)}`}
             />
             <Legend />
             <Bar dataKey={chart.yKey} fill="#2563eb" radius={[8, 8, 0, 0]} />

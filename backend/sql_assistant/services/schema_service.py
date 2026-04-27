@@ -259,6 +259,11 @@ class SchemaService:
                 continue
             cols = ", ".join([f'{c["name"]}:{c["type"]}' for c in data["columns"]])
             lines.append(f"- {table}({cols})")
+        lines.append("Primary keys:")
+        for pk in schema["relationships"]["primary_keys"]:
+            if pk["table"] not in allowed_tables:
+                continue
+            lines.append(f"- {pk['table']}.{pk['column']}")
         lines.append("Categorical literals:")
         for field_name, values in self.ENUM_LITERAL_HINTS.items():
             table_name = field_name.split(".", 1)[0]

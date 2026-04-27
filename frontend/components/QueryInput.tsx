@@ -2,15 +2,25 @@
 
 import { useEffect, useState } from "react";
 import { fetchSuggestions } from "@/lib/api";
+import { normalizeError } from "@/lib/error-utils";
 
 type Props = { onSubmit: (question: string) => void; loading: boolean };
 
 export function QueryInput({ onSubmit, loading }: Props) {
   const [question, setQuestion] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionError, setSuggestionError] = useState("");
 
   useEffect(() => {
-    fetchSuggestions().then(setSuggestions).catch(() => setSuggestions([]));
+    fetchSuggestions()
+      .then((data) => {
+        setSuggestions(data);
+        setSuggestionError("");
+      })
+      .catch((error) => {
+        setSuggestions([]);
+        setSuggestionError(normalizeError(error).message);
+      });
   }, []);
 
   return (
@@ -33,10 +43,11 @@ export function QueryInput({ onSubmit, loading }: Props) {
           </button>
         ))}
       </div>
+      {suggestionError && <p className="text-xs text-slate-500">{suggestionError}</p>}
       <button
         disabled={loading || !question.trim()}
         onClick={() => onSubmit(question)}
-        className="primary-btn"
+        className="primary-btn w-full sm:w-auto"
       >
         {loading ? "Generating SQL..." : "Generate SQL"}
       </button>

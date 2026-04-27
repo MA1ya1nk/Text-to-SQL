@@ -8,7 +8,8 @@ import { SQLDisplay } from "@/components/SQLDisplay";
 import { QueryExplanation } from "@/components/QueryExplanation";
 import { ConversationThread } from "@/components/ConversationThread";
 import { ExportPanel } from "@/components/ExportPanel";
-import { ApiError, executeQuery, explainQuery, previewQuery, saveFavorite } from "@/lib/api";
+import { executeQuery, explainQuery, previewQuery, saveFavorite } from "@/lib/api";
+import { normalizeError } from "@/lib/error-utils";
 import { QueryResponse } from "@/lib/types";
 import { useAssistantStore } from "@/store/assistant-store";
 
@@ -21,6 +22,7 @@ export default function HomePage() {
   const [explainLoading, setExplainLoading] = useState(false);
   const [executeLoading, setExecuteLoading] = useState(false);
   const [currentError, setCurrentError] = useState("");
+  const [currentErrorCode, setCurrentErrorCode] = useState("");
   const [toast, setToast] = useState<{ type: "success" | "error"; title: string; message: string } | null>(null);
   const { loading, setLoading, addConversation, conversation } = useAssistantStore();
 
@@ -30,25 +32,7 @@ export default function HomePage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const formatError = (error: unknown) => {
-    const apiError = error as ApiError;
-    const message = apiError?.message || "Unable to process this request right now.";
-    const code = apiError?.code || "";
-
-    if (message.toLowerCase().includes("cannot be answered from the current schema")) {
-      return "This question is outside the connected schema. Try using available tables/columns from the Schema page.";
-    }
-    if (code === "rate_limit") {
-      return "We are experiencing high traffic right now. Please wait a moment and try again.";
-    }
-    if (code === "provider_auth") {
-      return "LLM provider authentication failed. Please verify API keys in backend configuration.";
-    }
-    if (code === "provider_unavailable") {
-      return "The AI provider is temporarily unavailable. Please retry in a few moments.";
-    }
-    return message;
-  };
+  const formatError = (error: unknown) => normalizeError(error);
 
   const onSubmit = async (question: string) => {
     setLoading(true);
@@ -57,14 +41,16 @@ export default function HomePage() {
     setDraftSql("");
     setExplanation("");
     setCurrentError("");
+    setCurrentErrorCode("");
     try {
       const sql = await previewQuery(question);
       setDraftSql(sql);
       setTab("sql");
     } catch (error) {
-      const message = formatError(error);
-      setCurrentError(message);
-      addConversation({ question, error: message });
+      const details = formatError(error);
+      setCurrentError(details.message);
+      setCurrentErrorCode(details.code);
+      addConversation({ question, error: details.message });
     } finally {
       setLoading(false);
     }
@@ -74,6 +60,7 @@ export default function HomePage() {
     if (!currentQuestion || !draftSql.trim()) return;
     setExecuteLoading(true);
     setCurrentError("");
+    setCurrentErrorCode("");
     try {
       const data = await executeQuery(currentQuestion, draftSql);
       setResult(data);
@@ -81,9 +68,10 @@ export default function HomePage() {
       addConversation({ question: currentQuestion, response: data });
       setTab("table");
     } catch (error) {
-      const message = formatError(error);
-      setCurrentError(message);
-      addConversation({ question: currentQuestion || "Manual SQL", error: message });
+      const details = formatError(error);
+      setCurrentError(details.message);
+      setCurrentErrorCode(details.code);
+      addConversation({ question: currentQuestion || "Manual SQL", error: details.message });
     } finally {
       setExecuteLoading(false);
     }
@@ -93,13 +81,15 @@ export default function HomePage() {
     if (!draftSql.trim()) return;
     setExplainLoading(true);
     setCurrentError("");
+    setCurrentErrorCode("");
     try {
       const text = await explainQuery(draftSql, currentQuestion);
       setExplanation(text);
     } catch (error) {
-      const message = formatError(error);
-      setCurrentError(message);
-      setExplanation(message);
+      const details = formatError(error);
+      setCurrentError(details.message);
+      setCurrentErrorCode(details.code);
+      setExplanation(details.message);
     } finally {
       setExplainLoading(false);
     }
@@ -119,13 +109,14 @@ export default function HomePage() {
         message: "Your query was saved successfully. You can view it on the Favorites page."
       });
     } catch (error) {
-      const message = formatError(error);
-      setCurrentError(message);
-      addConversation({ question: currentQuestion, error: message });
+      const details = formatError(error);
+      setCurrentError(details.message);
+      setCurrentErrorCode(details.code);
+      addConversation({ question: currentQuestion, error: details.message });
       setToast({
         type: "error",
         title: "Could not save favorite",
-        message
+        message: details.message
       });
     }
   };
@@ -151,51 +142,69 @@ export default function HomePage() {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-4">
-      <div className="space-y-4 lg:col-span-3">
-        <QueryInput onSubmit={onSubmit} loading={loading} />
-        {currentError && (
-          <div className="error-callout">
-            <p className="error-title">Request could not be completed</p>
-            <p className="error-detail">{currentError}</p>
-          </div>
-        )}
-        {draftSql && <QueryExplanation explanation={explanation} loading={explainLoading} onExplain={onExplain} />}
-        {draftSql && (
-          <div className="card space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {["table", "chart", "sql"].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setTab(item as "table" | "chart" | "sql")}
-                  className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
-                    tab === item
-                      ? "bg-gradient-to-r from-indigo-600 to-sky-500 text-white shadow-lg shadow-indigo-500/25"
-                      : "border border-slate-200 bg-white/80 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"
-                  }`}
-                >
-                  {item.toUpperCase()}
-                </button>
-              ))}
-              <button onClick={onSaveFavorite} disabled={!draftSql.trim()} className="ghost-btn disabled:opacity-50">
-                Save Favorite
-              </button>
+        <div className="order-2 space-y-4 lg:order-1 lg:col-span-3">
+          <QueryInput onSubmit={onSubmit} loading={loading} />
+          {currentError && (
+            <div className={currentErrorCode === "schema_out_of_scope" ? "schema-callout" : "error-callout"}>
+              <p className={currentErrorCode === "schema_out_of_scope" ? "schema-title" : "error-title"}>
+                {currentErrorCode === "schema_out_of_scope" ? "Schema mismatch" : "Request could not be completed"}
+              </p>
+              <p className="error-detail">{currentError}</p>
+              {currentErrorCode === "schema_out_of_scope" && (
+                <a href="/schema" className="mt-3 inline-flex items-center rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-200 sm:text-sm">
+                  Open Schema Explorer
+                </a>
+              )}
             </div>
-            {tab === "table" && result && <ResultsTable columns={result.columns} rows={result.rows} />}
-            {tab === "chart" && result && <AutoChart columns={result.columns} rows={result.rows} chart={result.chart} />}
-            {tab === "sql" && (
-              <SQLDisplay
-                sqlText={draftSql}
-                editable
-                onSqlChange={setDraftSql}
-                onRun={onExecute}
-                running={executeLoading}
-              />
-            )}
-          </div>
-        )}
-        {result && <ExportPanel columns={result.columns} rows={result.rows} />}
-      </div>
-      <ConversationThread entries={conversation} />
+          )}
+          {draftSql && <QueryExplanation explanation={explanation} loading={explainLoading} onExplain={onExplain} />}
+          {draftSql && (
+            <div className="card space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {["table", "chart", "sql"].map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => setTab(item as "table" | "chart" | "sql")}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-medium transition sm:text-sm ${
+                      tab === item
+                        ? "bg-gradient-to-r from-indigo-600 to-sky-500 text-white shadow-lg shadow-indigo-500/25"
+                        : "border border-slate-200 bg-white/80 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"
+                    }`}
+                  >
+                    {item.toUpperCase()}
+                  </button>
+                ))}
+                <button
+                  onClick={onSaveFavorite}
+                  disabled={!draftSql.trim()}
+                  className="ghost-btn text-xs disabled:opacity-50 sm:text-sm"
+                >
+                  Save Favorite
+                </button>
+                {result && (
+                  <span className="ml-auto inline-flex items-center rounded-xl border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-600 sm:text-sm">
+                    {result.rows.length} rows · {result.columns.length} columns
+                  </span>
+                )}
+              </div>
+              {tab === "table" && result && <ResultsTable columns={result.columns} rows={result.rows} />}
+              {tab === "chart" && result && <AutoChart columns={result.columns} rows={result.rows} chart={result.chart} />}
+              {tab === "sql" && (
+                <SQLDisplay
+                  sqlText={draftSql}
+                  editable
+                  onSqlChange={setDraftSql}
+                  onRun={onExecute}
+                  running={executeLoading}
+                />
+              )}
+            </div>
+          )}
+          {result && <ExportPanel columns={result.columns} rows={result.rows} />}
+        </div>
+        <div className="order-1 lg:order-2">
+          <ConversationThread entries={conversation} />
+        </div>
       </div>
     </div>
   );

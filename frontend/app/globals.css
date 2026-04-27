@@ -24,7 +24,7 @@ body {
 }
 
 .card {
-  @apply panel p-5;
+  @apply panel p-4 sm:p-5;
 }
 
 .gradient-title {
@@ -59,8 +59,16 @@ body {
   @apply rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-rose-50 p-4 text-sm;
 }
 
+.schema-callout {
+  @apply rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-yellow-50 p-4 text-sm;
+}
+
 .error-title {
   @apply font-semibold text-red-700;
+}
+
+.schema-title {
+  @apply font-semibold text-amber-800;
 }
 
 .error-detail {
@@ -68,7 +76,7 @@ body {
 }
 
 .toast {
-  @apply fixed right-6 top-6 z-50 max-w-sm rounded-xl border p-4 shadow-2xl backdrop-blur-md;
+  @apply fixed left-3 right-3 top-3 z-50 rounded-xl border p-3 shadow-2xl backdrop-blur-md sm:left-auto sm:right-6 sm:top-6 sm:max-w-sm sm:p-4;
 }
 
 .toast-success {

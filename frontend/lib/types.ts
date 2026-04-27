@@ -7,6 +7,12 @@ export type QueryResponse = {
     type: "bar" | "line" | "pie" | "table" | "none";
     xKey: string | null;
     yKey: string | null;
+    xLabel?: string | null;
+    yLabel?: string | null;
+    xType?: "time" | "category" | string;
+    yFormat?: "currency" | "percent" | "number" | string;
+    sortBy?: string | null;
+    sortOrder?: "asc" | "desc" | string;
   };
   error?: string;
 };

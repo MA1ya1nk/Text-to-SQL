@@ -35,7 +35,7 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
 
   return (
     <div className="grid gap-4 lg:grid-cols-12">
-      <aside className="card lg:col-span-4">
+      <aside className="card min-w-0 lg:col-span-4">
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">Tables</h3>
         <input
           className="soft-input mb-3 w-full text-sm"
@@ -43,7 +43,7 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search tables..."
         />
-        <div className="max-h-[32rem] space-y-2 overflow-auto pr-1">
+        <div className="max-h-[18rem] space-y-2 overflow-auto pr-1 sm:max-h-[32rem]">
           {tableNames.length === 0 && <p className="text-sm text-slate-500">No matching tables.</p>}
           {tableNames.map((table) => {
             const isActive = table === activeTable;
@@ -65,27 +65,27 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
         </div>
       </aside>
 
-      <section className="card space-y-4 lg:col-span-8">
+      <section className="card min-w-0 space-y-4 lg:col-span-8">
         {!activeData ? (
           <p className="text-sm text-slate-500">No table available.</p>
         ) : (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-xl font-semibold text-slate-800">{activeTable}</h3>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h3 className="truncate text-lg font-semibold text-slate-800 sm:text-xl">{activeTable}</h3>
                 <p className="text-sm text-slate-500">
                   {activeData.columns.length} columns · {activeData.row_count ?? safeRows.length} rows
                 </p>
               </div>
-              <div className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+              <div className="w-fit rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
                 Live metadata
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200/80 bg-white/80">
+            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white/80">
               <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Columns</div>
               <div className="max-h-64 overflow-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[560px] text-xs sm:text-sm">
                   <thead className="sticky top-0 bg-slate-50/90">
                     <tr>
                       <th className="px-3 py-2 text-left font-semibold text-slate-700">Name</th>
@@ -96,8 +96,8 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
                   <tbody>
                     {activeData.columns.map((col) => (
                       <tr key={col.name} className="border-t border-slate-100">
-                        <td className="px-3 py-2 font-mono text-xs text-slate-700">{col.name}</td>
-                        <td className="px-3 py-2 text-slate-600">{col.type}</td>
+                        <td className="max-w-48 px-3 py-2 font-mono text-xs text-slate-700">{col.name}</td>
+                        <td className="max-w-44 px-3 py-2 text-slate-600">{col.type}</td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1.5">
                             {pkColumns.has(col.name) && (
@@ -134,7 +134,8 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
                       className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"
                       onClick={() => onSelectTable(fk.ref_table)}
                     >
-                      <span className="font-mono">{fk.column}</span> → <span className="font-mono">{fk.ref_table}.{fk.ref_column}</span>
+                      <span className="break-all font-mono">{fk.column}</span> →{" "}
+                      <span className="break-all font-mono">{fk.ref_table}.{fk.ref_column}</span>
                     </button>
                   ))}
                 </div>
@@ -149,20 +150,21 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
                       className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs text-slate-700 hover:border-indigo-200 hover:bg-indigo-50"
                       onClick={() => onSelectTable(fk.table)}
                     >
-                      <span className="font-mono">{fk.table}.{fk.column}</span> → <span className="font-mono">{fk.ref_column}</span>
+                      <span className="break-all font-mono">{fk.table}.{fk.column}</span> →{" "}
+                      <span className="break-all font-mono">{fk.ref_column}</span>
                     </button>
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200/80 bg-white/80">
+            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white/80">
               <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">Sample rows</div>
               {safeRows.length === 0 ? (
                 <p className="p-3 text-sm text-slate-500">No sample rows available.</p>
               ) : (
                 <div className="max-h-72 overflow-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[640px] text-xs sm:text-sm">
                     <thead className="sticky top-0 bg-slate-50/90">
                       <tr>
                         {safeCols.map((col) => (
@@ -176,7 +178,7 @@ export function SchemaExplorer({ schema, selectedTable, onSelectTable, loading =
                       {safeRows.map((row, rowIdx) => (
                         <tr key={rowIdx} className="border-t border-slate-100">
                           {row.map((cell, cellIdx) => (
-                            <td key={`${rowIdx}-${cellIdx}`} className="max-w-64 truncate px-3 py-2 text-slate-600">
+                            <td key={`${rowIdx}-${cellIdx}`} className="max-w-48 truncate px-3 py-2 text-slate-600 sm:max-w-64">
                               {String(cell ?? "NULL")}
                             </td>
                           ))}
