@@ -3,7 +3,7 @@
 Full-stack monorepo with:
 - Backend: Django 4.2 + DRF (SQLite default, PostgreSQL optional)
 - Frontend: Next.js 14 App Router + TypeScript + Tailwind
-- AI: OpenAI `gpt-4o-mini` (Gemini fallback)
+- AI: OpenAI `gpt-4o-mini` (Mistral fallback)
 
 ## Project Structure
 

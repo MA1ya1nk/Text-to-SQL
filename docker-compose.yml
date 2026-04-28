@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:16
+    container_name: sql_assistant_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sqlassistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "20350:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sql_assistant_backend
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DJANGO_SECRET_KEY: change-me
+      DJANGO_DEBUG: "True"
+      USE_SQLITE: "True"
+      SCHEMA_TABLE_PREFIX: ecommerce_
+      POSTGRES_DB: sqlassistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      OPENAI_API_KEY: ""
+      MISTRAL_API_KEY: "VRJ63MsgayayTKlM8pRwFwn3yjA9DvRG"
+    ports:
+      - "20351:8000"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: sql_assistant_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE: http://116.202.210.102:20351
+    ports:
+      - "20352:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
