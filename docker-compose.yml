@@ -31,7 +31,7 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: 5432
       OPENAI_API_KEY: ""
-      GEMINI_API_KEY: ""
+      MISTRAL_API_KEY: "VRJ63MsgayayTKlM8pRwFwn3yjA9DvRG"
     ports:
       - "20351:8000"
     volumes:
